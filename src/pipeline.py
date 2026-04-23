@@ -6,6 +6,8 @@ import base64
 import hashlib
 import io
 import json
+from functools import lru_cache
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,9 +16,13 @@ from PIL import Image
 
 from .config import (
     ADVICE_MODEL,
+    CLASS_NAMES_CSV,
+    CLASS_NAMES_PATH,
     CONFIDENCE_THRESHOLD,
     MARGIN_THRESHOLD,
     MAX_IMAGE_SIZE,
+    MODEL_INPUT_SIZE,
+    MODEL_PATH,
     OPENAI_API_KEY,
     SUPPORTED_CROPS,
     TOP_K,
@@ -28,6 +34,11 @@ try:
     from openai import OpenAI
 except Exception:  # pragma: no cover - import safety for environments without package
     OpenAI = None
+
+try:
+    from tensorflow.keras.models import load_model
+except Exception:  # pragma: no cover - import safety for environments without package
+    load_model = None
 
 
 @dataclass
@@ -56,6 +67,84 @@ def _image_to_data_url(image: Image.Image) -> str:
     resized.save(buffer, format="JPEG", quality=92)
     b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/jpeg;base64,{b64}"
+
+
+def _load_class_names() -> list[str]:
+    if CLASS_NAMES_CSV.strip():
+        names = [name.strip() for name in CLASS_NAMES_CSV.split(",") if name.strip()]
+        if names:
+            return names
+
+    path = Path(CLASS_NAMES_PATH)
+    if path.exists():
+        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+        names = [line for line in lines if line]
+        if names:
+            return names
+
+    return []
+
+
+@lru_cache(maxsize=1)
+def _load_local_model():
+    if load_model is None:
+        return None
+
+    path = Path(MODEL_PATH)
+    if not path.exists():
+        return None
+
+    try:
+        return load_model(path, compile=False)
+    except Exception:
+        return None
+
+
+def _predict_with_local_h5(image: Image.Image) -> LocalPrediction | None:
+    model = _load_local_model()
+    if model is None:
+        return None
+
+    class_names = _load_class_names()
+    resized = image.copy().convert("RGB").resize((MODEL_INPUT_SIZE, MODEL_INPUT_SIZE))
+    arr = np.array(resized, dtype=np.float32) / 255.0
+    arr = np.expand_dims(arr, axis=0)
+
+    try:
+        preds = model.predict(arr, verbose=0)
+    except Exception:
+        return None
+
+    if preds is None or len(preds) == 0:
+        return None
+
+    probs = np.array(preds[0], dtype=np.float32)
+    if probs.ndim != 1 or probs.size == 0:
+        return None
+
+    probs = np.maximum(probs, 0)
+    if probs.sum() <= 0:
+        return None
+    probs = probs / probs.sum()
+
+    if len(class_names) != len(probs):
+        class_names = [f"class_{i}" for i in range(len(probs))]
+
+    sorted_idx = np.argsort(probs)[::-1]
+    top_idx = int(sorted_idx[0])
+    second_idx = int(sorted_idx[1]) if len(sorted_idx) > 1 else top_idx
+
+    top_k = [
+        {"label": class_names[int(i)], "probability": round(float(probs[int(i)]), 4)}
+        for i in sorted_idx[: min(TOP_K, len(sorted_idx))]
+    ]
+
+    return LocalPrediction(
+        label=class_names[top_idx],
+        confidence=float(probs[top_idx]),
+        top_k=top_k,
+        margin=float(probs[top_idx] - probs[second_idx]),
+    )
 
 
 def _fallback_vision_analysis(image: Image.Image) -> dict[str, Any]:
@@ -124,6 +213,10 @@ def _crop_disease_space(crop: str) -> list[str]:
 
 
 def predict_disease(image: Image.Image, likely_crop: str) -> LocalPrediction:
+    local_prediction = _predict_with_local_h5(image)
+    if local_prediction is not None:
+        return local_prediction
+
     resized = image.copy().convert("RGB")
     resized.thumbnail((224, 224))
 

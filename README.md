@@ -17,7 +17,7 @@ User Photo
    ↓
 [Decision Layer 1: Input Triage]
    ↓
-[Local Disease Model - MobileNetV2 (demo stub)]
+[Local Disease Model - MobileNetV2 (.h5, fallback stub)]
    ↓
 [Decision Layer 2: Diagnostic Trust Policy]
    ↓
@@ -46,6 +46,26 @@ Open `http://localhost:8501`.
 - `ADVICE_MODEL` - default `gpt-4o-mini`
 - `CONFIDENCE_THRESHOLD` - default `0.80`
 - `MARGIN_THRESHOLD` - default `0.15`
+- `MODEL_PATH` - default `models/raichica_v1.h5`
+- `CLASS_NAMES_PATH` - default `models/class_names.txt`
+- `MODEL_INPUT_SIZE` - default `224`
+
+## Local `.h5` model setup
+
+1. Create folder `models/`.
+2. Put your model as `models/raichica_v1.h5` (or set `MODEL_PATH`).
+3. Add `models/class_names.txt` with one label per line, in the exact output order of your model.
+
+Example `class_names.txt`:
+
+```text
+Tomato Early Blight
+Tomato Late Blight
+Tomato Healthy
+```
+
+The pipeline calls the model inside `predict_disease()` in `src/pipeline.py`.
+If model loading fails, it automatically falls back to demo deterministic predictions.
 
 ## Streamlit Cloud deploy
 
@@ -57,5 +77,4 @@ Open `http://localhost:8501`.
 
 ## Notes
 
-- The local classifier in this demo is a deterministic stub for presentation.
-- Replace `predict_disease` in `src/pipeline.py` with your real MobileNetV2 inference for production.
+- The app now tries to use local Keras `.h5` model first, then fallback stub.
