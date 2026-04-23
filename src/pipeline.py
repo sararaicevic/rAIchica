@@ -688,7 +688,6 @@ def run_full_pipeline(image: Image.Image) -> dict[str, Any]:
             {"label": item["class_name"], "probability": round(float(item["confidence"]), 4)}
             for item in model_result.get("top_predictions", [])
         ],
-        "symptoms": vision_result.get("symptom_description", ""),
         "trust_checks": decision_result.get("reasons", {}),
         "vision": vision_result,
         "model_loader_status": model_loader_status,
