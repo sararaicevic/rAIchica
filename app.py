@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import streamlit as st
@@ -21,6 +22,12 @@ def _pick_logo() -> Path | None:
         if candidate.exists():
             return candidate
     return None
+
+
+def _logo_data_url(path: Path) -> str:
+    mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    data = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return f"data:{mime};base64,{data}"
 
 
 LOGO = _pick_logo()
@@ -154,26 +161,26 @@ st.markdown(
     """
     <style>
     :root {
-        --bg0: #03110b;
-        --bg1: #071913;
-        --bg2: #0d2419;
-        --panel: rgba(12, 24, 17, 0.88);
-        --panel-2: rgba(255,255,255,0.04);
-        --border: rgba(255,255,255,0.10);
-        --text: #eef9f2;
-        --muted: rgba(238,249,242,0.72);
-        --muted-2: rgba(238,249,242,0.52);
-        --green: #78f0a8;
-        --green-strong: #29d27c;
-        --amber: #ffd166;
-        --red: #ff7d7d;
-        --shadow: 0 24px 60px rgba(0,0,0,0.35);
+        --bg0: #f4f8f1;
+        --bg1: #e8f2e2;
+        --bg2: #dcebd7;
+        --panel: rgba(255,255,255,0.78);
+        --panel-2: rgba(255,255,255,0.56);
+        --border: rgba(31, 63, 45, 0.10);
+        --text: #143325;
+        --muted: rgba(20,51,37,0.72);
+        --muted-2: rgba(20,51,37,0.52);
+        --green: #2f9d63;
+        --green-strong: #18784a;
+        --amber: #f2b84b;
+        --red: #c85d57;
+        --shadow: 0 22px 50px rgba(20, 51, 37, 0.12);
     }
 
     .stApp {
         background:
-            radial-gradient(circle at 16% 8%, rgba(120,240,168,0.20), transparent 24%),
-            radial-gradient(circle at 84% 12%, rgba(255,209,102,0.14), transparent 20%),
+            radial-gradient(circle at 16% 8%, rgba(47,157,99,0.16), transparent 24%),
+            radial-gradient(circle at 84% 12%, rgba(242,184,75,0.18), transparent 20%),
             linear-gradient(180deg, var(--bg0), var(--bg1) 42%, var(--bg2));
         color: var(--text);
     }
@@ -187,10 +194,28 @@ st.markdown(
     .hero-shell {
         border: 1px solid var(--border);
         border-radius: 34px;
-        background: linear-gradient(180deg, rgba(14,33,22,0.94), rgba(8,18,13,0.92));
+        background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(247,251,244,0.92));
         box-shadow: var(--shadow);
-        padding: 1rem;
+        padding: 0.7rem 0.9rem 0.9rem;
         margin-bottom: 1rem;
+    }
+
+    .brand-top {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 0.6rem;
+    }
+
+    .brand-top img {
+        width: 148px;
+        height: 148px;
+        object-fit: contain;
+        border-radius: 32px;
+        border: 1px solid rgba(47,157,99,0.12);
+        background:
+            radial-gradient(circle at 30% 20%, rgba(47,157,99,0.10), transparent 48%),
+            rgba(255,255,255,0.9);
+        box-shadow: 0 18px 36px rgba(20,51,37,0.11);
     }
 
     .logo-box img {
@@ -198,11 +223,11 @@ st.markdown(
         height: 118px;
         object-fit: contain;
         border-radius: 28px;
-        border: 1px solid rgba(255,255,255,0.10);
+        border: 1px solid rgba(47,157,99,0.12);
         background:
-            radial-gradient(circle at 30% 20%, rgba(120,240,168,0.20), transparent 48%),
-            rgba(255,255,255,0.03);
-        box-shadow: 0 18px 40px rgba(0,0,0,0.25);
+            radial-gradient(circle at 30% 20%, rgba(47,157,99,0.10), transparent 48%),
+            rgba(255,255,255,0.85);
+        box-shadow: 0 16px 30px rgba(20,51,37,0.10);
     }
 
     .brand-kicker {
@@ -241,9 +266,9 @@ st.markdown(
         padding: 0.42rem 0.7rem;
         border-radius: 999px;
         font-size: 0.8rem;
-        color: var(--text);
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.10);
+        color: var(--green-strong);
+        background: rgba(47,157,99,0.08);
+        border: 1px solid rgba(47,157,99,0.14);
     }
 
     .panel {
@@ -267,13 +292,6 @@ st.markdown(
         line-height: 1.5;
     }
 
-    .upload-shell {
-        border: 1px dashed rgba(255,255,255,0.14);
-        border-radius: 22px;
-        background: rgba(255,255,255,0.03);
-        padding: 0.9rem;
-    }
-
     .capture-hint {
         display: flex;
         flex-wrap: wrap;
@@ -284,9 +302,9 @@ st.markdown(
     .capture-pill {
         padding: 0.38rem 0.62rem;
         border-radius: 999px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.10);
-        color: var(--text);
+        background: rgba(242,184,75,0.18);
+        border: 1px solid rgba(242,184,75,0.24);
+        color: #6f4b06;
         font-size: 0.78rem;
         font-weight: 800;
     }
@@ -303,20 +321,20 @@ st.markdown(
         margin-top: 1rem;
         padding: 0.9rem 1rem;
         border-radius: 18px;
-        border: 1px solid rgba(255,255,255,0.10);
+        border: 1px solid rgba(20,51,37,0.08);
         font-weight: 800;
         letter-spacing: 0.01em;
     }
 
-    .status-box.success { background: rgba(39,174,96,0.18); color: #c9f8d8; }
-    .status-box.warning { background: rgba(255,209,102,0.15); color: #ffe8a4; }
-    .status-box.danger  { background: rgba(255,125,125,0.15); color: #ffd2d2; }
+    .status-box.success { background: rgba(47,157,99,0.12); color: #176a42; }
+    .status-box.warning { background: rgba(242,184,75,0.16); color: #7b540a; }
+    .status-box.danger  { background: rgba(200,93,87,0.12); color: #8e352f; }
 
     .result-card {
         margin-top: 1rem;
         border: 1px solid var(--border);
         border-radius: 28px;
-        background: rgba(10, 21, 15, 0.88);
+        background: rgba(255,255,255,0.82);
         box-shadow: var(--shadow);
         padding: 1rem;
     }
@@ -350,9 +368,9 @@ st.markdown(
         border-radius: 999px;
         font-size: 0.78rem;
         font-weight: 800;
-        border: 1px solid rgba(255,255,255,0.12);
-        background: rgba(255,255,255,0.05);
-        color: var(--text);
+        border: 1px solid rgba(47,157,99,0.16);
+        background: rgba(47,157,99,0.08);
+        color: var(--green-strong);
         white-space: nowrap;
     }
 
@@ -363,9 +381,9 @@ st.markdown(
     }
 
     .metric {
-        border: 1px solid rgba(255,255,255,0.08);
+        border: 1px solid rgba(20,51,37,0.08);
         border-radius: 20px;
-        background: rgba(255,255,255,0.04);
+        background: rgba(244,248,241,0.92);
         padding: 0.85rem;
     }
 
@@ -386,9 +404,9 @@ st.markdown(
 
     .guidance {
         margin-top: 1rem;
-        border: 1px solid rgba(255,255,255,0.08);
+        border: 1px solid rgba(20,51,37,0.08);
         border-radius: 24px;
-        background: rgba(255,255,255,0.03);
+        background: rgba(255,255,255,0.78);
         padding: 0.95rem;
     }
 
@@ -414,17 +432,17 @@ st.markdown(
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(3, 17, 11, 0.62);
-        backdrop-filter: blur(10px);
+        background: rgba(244, 248, 241, 0.56);
+        backdrop-filter: blur(8px);
     }
 
     .loading-card {
         width: min(320px, calc(100vw - 2rem));
         padding: 1.15rem 1.1rem;
         border-radius: 28px;
-        border: 1px solid rgba(255,255,255,0.12);
-        background: linear-gradient(180deg, rgba(13, 33, 22, 0.96), rgba(8, 18, 13, 0.96));
-        box-shadow: 0 30px 80px rgba(0,0,0,0.42);
+        border: 1px solid rgba(47,157,99,0.12);
+        background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(243,248,240,0.96));
+        box-shadow: 0 26px 70px rgba(20,51,37,0.14);
         text-align: center;
     }
 
@@ -433,9 +451,9 @@ st.markdown(
         height: 74px;
         margin: 0 auto 0.9rem;
         border-radius: 50%;
-        border: 6px solid rgba(255,255,255,0.08);
+        border: 6px solid rgba(47,157,99,0.10);
         border-top-color: var(--green);
-        border-right-color: rgba(120,240,168,0.45);
+        border-right-color: rgba(242,184,75,0.52);
         animation: loading-spin 0.9s linear infinite;
     }
 
@@ -453,6 +471,102 @@ st.markdown(
         line-height: 1.4;
     }
 
+    div[data-testid="stButton"] button {
+        border-radius: 999px !important;
+        border: 1px solid rgba(47,157,99,0.22) !important;
+        background: linear-gradient(135deg, #d8f1df, #bceacb) !important;
+        color: var(--green-strong) !important;
+        box-shadow: 0 12px 30px rgba(47,157,99,0.22) !important;
+        font-weight: 800 !important;
+    }
+
+    div[data-testid="stButton"] button:hover {
+        filter: brightness(0.98);
+    }
+
+    div[data-testid="stRadio"] label {
+        color: var(--text) !important;
+    }
+
+    div[data-testid="stRadio"] label * {
+        color: var(--text) !important;
+    }
+
+    div[data-testid="stRadio"] [data-baseweb="radio"] {
+        background: rgba(47,157,99,0.06);
+        border: 1px solid rgba(47,157,99,0.14);
+        border-radius: 999px;
+        padding: 0.14rem 0.4rem;
+    }
+
+    div[data-testid="stRadio"] [data-baseweb="radio"] * {
+        color: var(--text) !important;
+    }
+
+    div[data-testid="stRadio"] [data-baseweb="radio"] svg {
+        fill: var(--green) !important;
+    }
+
+    div[data-testid="stFileUploader"] * {
+        color: var(--text) !important;
+        opacity: 1 !important;
+    }
+
+    div[data-testid="stCameraInput"] * {
+        color: var(--text) !important;
+        opacity: 1 !important;
+    }
+
+    div[data-testid="stFileUploader"] section,
+    div[data-testid="stCameraInput"] section {
+        background: rgba(255,255,255,0.92) !important;
+        border: 1px solid rgba(47,157,99,0.16) !important;
+        border-radius: 18px !important;
+    }
+
+    div[data-testid="stFileUploader"] small,
+    div[data-testid="stCameraInput"] small,
+    div[data-testid="stFileUploader"] p,
+    div[data-testid="stCameraInput"] p,
+    div[data-testid="stFileUploader"] label,
+    div[data-testid="stCameraInput"] label {
+        color: var(--text) !important;
+        opacity: 1 !important;
+        font-weight: 700 !important;
+    }
+
+    div[data-testid="stFileUploader"] button,
+    div[data-testid="stCameraInput"] button {
+        background: rgba(47,157,99,0.14) !important;
+        border: 1px solid rgba(47,157,99,0.22) !important;
+        color: var(--text) !important;
+    }
+
+    div[data-testid="stDialog"],
+    div[role="dialog"] {
+        background: rgba(244, 248, 241, 0.58) !important;
+    }
+
+    div[data-testid="stDialog"] > div,
+    div[role="dialog"] > div {
+        background: rgba(255,255,255,0.98) !important;
+        color: var(--text) !important;
+        border: 1px solid rgba(47,157,99,0.14) !important;
+        border-radius: 30px !important;
+        box-shadow: 0 28px 80px rgba(20,51,37,0.16) !important;
+    }
+
+    div[data-testid="stDialog"] *,
+    div[role="dialog"] * {
+        color: var(--text) !important;
+    }
+
+    div[data-testid="stDialog"] button,
+    div[role="dialog"] button {
+        background: linear-gradient(135deg, #d8f1df, #bceacb) !important;
+        color: var(--green-strong) !important;
+    }
+
     @keyframes loading-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -462,23 +576,32 @@ st.markdown(
         .brand-title { font-size: 1.82rem; }
         .metric-grid { grid-template-columns: 1fr; }
         .result-head { flex-direction: column; }
-        .logo-box img { width: 92px; height: 92px; }
+        .brand-top img { width: 130px; height: 130px; }
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-logo = LOGO
-
 st.markdown('<div class="hero-shell">', unsafe_allow_html=True)
+if LOGO:
+    st.markdown(
+        f"""
+        <div style="display:flex;justify-content:center;margin:0.1rem 0 0.4rem;">
+            <img src="{_logo_data_url(LOGO)}" alt="rAIchica logo"
+                 style="width:148px;height:148px;object-fit:contain;border-radius:32px;
+                        border:1px solid rgba(47,157,99,0.12);
+                        background:rgba(255,255,255,0.92);
+                        box-shadow:0 18px 36px rgba(20,51,37,0.11);" />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 intro_left, intro_right = st.columns([1.08, 0.92], gap="medium")
 
 with intro_left:
     with st.container(border=False):
-        if logo:
-            st.image(str(logo), width=128)
-        st.markdown('<div class="brand-kicker">rAIchica</div>', unsafe_allow_html=True)
         st.markdown('<h1 class="brand-title">Your crop, checked in one tap.</h1>', unsafe_allow_html=True)
         st.markdown(
             """
@@ -494,7 +617,7 @@ with intro_left:
             <div class="chip-row">
                 <span class="chip">Camera first</span>
                 <span class="chip">Upload as backup</span>
-                <span class="chip">Local .h5 diagnosis</span>
+                <span class="chip">Fast check</span>
                 <span class="chip">Practical advice</span>
             </div>
             """,
@@ -503,7 +626,7 @@ with intro_left:
         st.markdown('<div class="hero-note">Built for quick camera capture and fast decisions.</div>', unsafe_allow_html=True)
 
 with intro_right:
-    with st.container(border=False):
+    with st.container(border=True):
         st.markdown('<div class="panel-title">Capture</div>', unsafe_allow_html=True)
         st.markdown(
             '<div class="panel-copy">Take a fresh photo or pick one from your gallery. The app handles the rest.</div>',
@@ -519,9 +642,7 @@ with intro_right:
             unsafe_allow_html=True,
         )
         input_mode = st.radio("Input", ["Camera", "Upload"], horizontal=True, label_visibility="collapsed")
-        st.markdown('<div class="upload-shell">', unsafe_allow_html=True)
         image_file = st.camera_input("Take a photo") if input_mode == "Camera" else st.file_uploader("Upload plant photo", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
         analyze = st.button("Analyze plant", type="primary", use_container_width=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
