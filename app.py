@@ -407,6 +407,57 @@ st.markdown(
         line-height: 1.45;
     }
 
+    .loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(3, 17, 11, 0.62);
+        backdrop-filter: blur(10px);
+    }
+
+    .loading-card {
+        width: min(320px, calc(100vw - 2rem));
+        padding: 1.15rem 1.1rem;
+        border-radius: 28px;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: linear-gradient(180deg, rgba(13, 33, 22, 0.96), rgba(8, 18, 13, 0.96));
+        box-shadow: 0 30px 80px rgba(0,0,0,0.42);
+        text-align: center;
+    }
+
+    .loading-ring {
+        width: 74px;
+        height: 74px;
+        margin: 0 auto 0.9rem;
+        border-radius: 50%;
+        border: 6px solid rgba(255,255,255,0.08);
+        border-top-color: var(--green);
+        border-right-color: rgba(120,240,168,0.45);
+        animation: loading-spin 0.9s linear infinite;
+    }
+
+    .loading-title {
+        font-size: 1.02rem;
+        font-weight: 900;
+        color: var(--text);
+        margin: 0;
+    }
+
+    .loading-copy {
+        margin-top: 0.35rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.4;
+    }
+
+    @keyframes loading-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
     @media (max-width: 720px) {
         .brand-title { font-size: 1.82rem; }
         .metric-grid { grid-template-columns: 1fr; }
@@ -480,8 +531,22 @@ if image_file:
     st.image(image, caption="Preview", use_container_width=True)
 
     if analyze:
+        loading_slot = st.empty()
+        loading_slot.markdown(
+            """
+            <div class="loading-overlay">
+                <div class="loading-card">
+                    <div class="loading-ring"></div>
+                    <div class="loading-title">Reading the leaf</div>
+                    <div class="loading-copy">Vision checks the image, the model scores it, and advice is prepared.</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         with st.spinner("Reading the leaf..."):
             result = run_pipeline(image)
+        loading_slot.empty()
 
         st.session_state["latest_result"] = result
         st.session_state["show_result_dialog"] = True
