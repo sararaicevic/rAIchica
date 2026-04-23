@@ -65,13 +65,17 @@ if uploaded:
         status = result.get("status", "unknown")
         if status == "accepted_diagnosis":
             st.success(f"Diagnosis accepted: {result.get('diagnosis')} ({result.get('confidence', 0):.2f})")
-        elif status in {"uncertain_diagnosis", "retake_or_review"}:
+        elif status == "plant_confirmed":
+            st.success(result.get("message", "Plant detected."))
+        elif status == "uncertain_diagnosis":
+            st.warning(f"Uncertain diagnosis: {result.get('diagnosis', 'unknown')} ({result.get('confidence', 0):.2f})")
+        elif status == "retake_or_review":
             st.warning("Diagnosis uncertain. Review recommendations below.")
         else:
             st.error(result.get("message", "Input requires retake."))
 
-        if "advice" in result:
-            advice = result["advice"]
+        advice = result.get("advice_result")
+        if advice:
             st.subheader("Farmer-friendly guidance")
             st.write(advice.get("summary", ""))
 
@@ -97,18 +101,22 @@ if uploaded:
                 st.markdown("**Eco impact note**")
                 st.write(advice.get("eco_impact_note", ""))
 
-        with st.expander("Debug: full pipeline JSON", expanded=False):
-            st.code(json.dumps(result, indent=2, ensure_ascii=False), language="json")
-
-        prediction_debug = result.get("prediction_debug")
-        if prediction_debug:
-            with st.expander("Debug: local model output", expanded=False):
-                st.write("This shows the raw `.h5` output and how it was converted into the final decision.")
-                st.code(json.dumps(prediction_debug, indent=2, ensure_ascii=False), language="json")
+        with st.expander("Pipeline steps", expanded=True):
+            for key, title in [
+                ("model_loader_status", "Model loader status"),
+                ("vision_result", "Vision result"),
+                ("model_result", "Model result"),
+                ("decision_result", "Decision result"),
+                ("advice_result", "Advice result"),
+            ]:
+                value = result.get(key)
+                if value is not None:
+                    st.markdown(f"**{title}**")
+                    st.code(json.dumps(value, indent=2, ensure_ascii=False), language="json")
 
         trace = result.get("trace")
         if trace:
-            with st.expander("Debug: pipeline trace", expanded=True):
+            with st.expander("Pipeline trace", expanded=True):
                 st.write("Step-by-step execution trace in English.")
                 for index, entry in enumerate(trace, start=1):
                     step = entry.get("step", "unknown_step")

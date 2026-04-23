@@ -25,6 +25,9 @@ Rules:
 - If a person, face, hand, body, clothing, or human scene is the main subject, set contains_person to true and is_plant to false.
 - Do not infer plant presence from green background, grass, leaves in the background, or clothing color.
 - If both a person and a plant are visible, treat the image as not suitable unless the plant is the clear primary subject.
+- If a hand is holding a plant and the plant is clearly the main subject, prefer is_plant true and contains_person false.
+- If the image is a portrait, selfie, person holding an object, or any human-centric scene, reject it as not a plant.
+- When in doubt, prefer false for is_plant. Only set is_plant to true when a plant is clearly the primary subject.
 - If the image is blurry, too dark, too far away, or unusable, set image_quality to poor.
 - likely_crop should be your best guess from the visible plant.
 - symptom_description should describe only what is visually observable.

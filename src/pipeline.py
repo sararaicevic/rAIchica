@@ -29,7 +29,7 @@ from .config import (
     TOP_K,
     VISION_MODEL,
 )
-from .prompts import ADVICE_GENERATOR_PROMPT, VISION_GATEKEEPER_PROMPT
+from .prompts import VISION_GATEKEEPER_PROMPT
 
 try:
     from openai import OpenAI
@@ -105,6 +105,41 @@ def _load_local_model():
     except Exception:
         logger.exception("Failed to load local .h5 model from %s", path)
         return None
+
+
+def get_local_model_status() -> dict[str, Any]:
+    path = Path(MODEL_PATH)
+    class_names_path = Path(CLASS_NAMES_PATH)
+
+    if load_model is None:
+        return {
+            "available": False,
+            "reason": "tensorflow_unavailable",
+            "model_path": str(path),
+            "model_exists": path.exists(),
+            "class_names_path": str(class_names_path),
+            "class_names_exists": class_names_path.exists(),
+        }
+
+    model = _load_local_model()
+    if model is None:
+        return {
+            "available": False,
+            "reason": "model_load_failed_or_missing_file",
+            "model_path": str(path),
+            "model_exists": path.exists(),
+            "class_names_path": str(class_names_path),
+            "class_names_exists": class_names_path.exists(),
+        }
+
+    return {
+        "available": True,
+        "reason": "loaded",
+        "model_path": str(path),
+        "model_exists": path.exists(),
+        "class_names_path": str(class_names_path),
+        "class_names_exists": class_names_path.exists(),
+    }
 
 
 def _predict_with_local_h5(image: Image.Image) -> tuple[LocalPrediction | None, dict[str, Any]]:
@@ -207,8 +242,8 @@ def _fallback_vision_analysis(image: Image.Image) -> dict[str, Any]:
     )
     skin_ratio = float(skin_like.mean())
 
-    contains_person = skin_ratio > 0.12
-    is_plant = green_ratio > 0.30 and not contains_person
+    contains_person = skin_ratio > 0.20
+    is_plant = green_ratio > 0.30
     quality = "good" if brightness > 45 and sharpness > 30 else "poor"
     symptoms_visible = bool(((arr[:, :, 0] > 150) & (arr[:, :, 1] < 120)).mean() > 0.05)
 
@@ -229,7 +264,7 @@ def _fallback_vision_analysis(image: Image.Image) -> dict[str, Any]:
     }
 
 
-def analyze_with_vision(image: Image.Image) -> tuple[dict[str, Any], str]:
+def run_vision_gatekeeper(image: Image.Image) -> tuple[dict[str, Any], str]:
     fallback = _fallback_vision_analysis(image)
 
     if not OPENAI_API_KEY or OpenAI is None:
@@ -253,6 +288,31 @@ def analyze_with_vision(image: Image.Image) -> tuple[dict[str, Any], str]:
         )
         parsed = _safe_json_load(response.output_text, fallback)
         merged = {**fallback, **parsed}
+        primary_subject = str(merged.get("primary_subject", "")).strip().lower()
+        contains_person = bool(merged.get("contains_person", False)) or primary_subject == "human"
+
+        if primary_subject == "plant":
+            merged["contains_person"] = False
+            merged["is_plant"] = True
+            merged["primary_subject"] = "plant"
+            merged["rejection_reason"] = ""
+        elif primary_subject == "human":
+            merged["contains_person"] = True
+            merged["is_plant"] = False
+            merged["primary_subject"] = "human"
+            merged["likely_crop"] = "unknown"
+            merged["symptoms_visible"] = False
+            merged["rejection_reason"] = merged.get("rejection_reason") or "Human-centric scene detected."
+        elif contains_person and primary_subject not in {"plant", "other"}:
+            merged["contains_person"] = True
+            merged["primary_subject"] = primary_subject or "human"
+            merged["is_plant"] = False
+            merged["likely_crop"] = "unknown"
+            merged["symptoms_visible"] = False
+            merged["rejection_reason"] = merged.get("rejection_reason") or "Human-centric or non-plant scene detected."
+        elif not merged.get("is_plant", False):
+            merged["likely_crop"] = "unknown"
+
         return merged, "openai"
     except Exception:
         return fallback, "fallback"
@@ -303,15 +363,37 @@ def _fallback_stub_prediction(image: Image.Image, likely_crop: str) -> LocalPred
     )
 
 
-def predict_disease(image: Image.Image, likely_crop: str) -> LocalPrediction:
+def predict_with_local_model(image: Image.Image, top_k: int = TOP_K, likely_crop: str = "unknown") -> dict[str, Any]:
     local_prediction, _ = _predict_with_local_h5(image)
     if local_prediction is not None:
-        return local_prediction
+        results = local_prediction.top_k[:top_k]
+        return {
+            "model_source": "local_h5",
+            "status": "completed",
+            "predicted_class": local_prediction.label,
+            "confidence": round(local_prediction.confidence, 4),
+            "margin": round(local_prediction.margin, 4),
+            "top_predictions": [
+                {"class_name": item["label"], "confidence": float(item["probability"])}
+                for item in results
+            ],
+        }
 
-    return _fallback_stub_prediction(image, likely_crop)
+    fallback_prediction = _fallback_stub_prediction(image, likely_crop)
+    return {
+        "model_source": "fallback_stub",
+        "status": "completed_with_fallback",
+        "predicted_class": fallback_prediction.label,
+        "confidence": round(fallback_prediction.confidence, 4),
+        "margin": round(fallback_prediction.margin, 4),
+        "top_predictions": [
+            {"class_name": item["label"], "confidence": float(item["probability"])}
+            for item in fallback_prediction.top_k[:top_k]
+        ],
+    }
 
 
-def _diagnostic_trust(
+def _decision_from_values(
     likely_crop: str,
     label: str,
     confidence: float,
@@ -344,7 +426,39 @@ def _diagnostic_trust(
         "margin_ok": margin >= MARGIN_THRESHOLD,
     }
 
-    return {"status": status, "reasons": reasons}
+    return {
+        "status": status,
+        "reasons": reasons,
+        "accepted": accepted,
+        "message": "Diagnosis accepted." if accepted else "Diagnosis is uncertain and should be treated as a lower-confidence output.",
+    }
+
+
+def decision_layer(vision_result: dict[str, Any], model_result: dict[str, Any]) -> dict[str, Any]:
+    predicted_class = model_result.get("predicted_class", "unknown")
+    confidence = float(model_result.get("confidence", 0.0))
+    margin = float(model_result.get("margin", 0.0))
+    likely_crop = vision_result.get("likely_crop", "unknown")
+    diagnosis_support = vision_result.get("diagnosis_support", "uncertain")
+    result = _decision_from_values(likely_crop, predicted_class, confidence, margin, diagnosis_support)
+    result["inputs"] = {
+        "likely_crop": likely_crop,
+        "predicted_class": predicted_class,
+        "confidence": round(confidence, 4),
+        "margin": round(margin, 4),
+        "diagnosis_support": diagnosis_support,
+    }
+    return result
+
+
+def _diagnostic_trust(
+    likely_crop: str,
+    label: str,
+    confidence: float,
+    margin: float,
+    diagnosis_support: str,
+) -> dict[str, Any]:
+    return _decision_from_values(likely_crop, label, confidence, margin, diagnosis_support)
 
 
 def _fallback_advice(payload: dict[str, Any]) -> dict[str, Any]:
@@ -385,11 +499,50 @@ def _trace_entry(step: str, status: str, returned: dict[str, Any] | None = None,
     return entry
 
 
-def generate_advice(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    fallback = _fallback_advice(payload)
+def _json_schema_farmer_advice() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "chemical_treatment": {"type": "array", "items": {"type": "string"}},
+            "organic_alternatives": {"type": "array", "items": {"type": "string"}},
+            "prevention_steps": {"type": "array", "items": {"type": "string"}},
+            "neighboring_plant_protection": {"type": "array", "items": {"type": "string"}},
+            "eco_impact_note": {"type": "string"},
+        },
+        "required": [
+            "summary",
+            "chemical_treatment",
+            "organic_alternatives",
+            "prevention_steps",
+            "neighboring_plant_protection",
+            "eco_impact_note",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def generate_farmer_advice(
+    vision_result: dict[str, Any],
+    model_result: dict[str, Any],
+    decision_result: dict[str, Any],
+) -> dict[str, Any]:
+    payload = {
+        "region": "Western Balkans",
+        "vision_result": vision_result,
+        "model_result": model_result,
+        "decision_result": decision_result,
+    }
+
+    fallback = _fallback_advice(
+        {
+            "status": decision_result.get("status", "uncertain_diagnosis"),
+            "diagnosis": model_result.get("predicted_class", "unknown"),
+        }
+    )
 
     if not OPENAI_API_KEY or OpenAI is None:
-        return fallback, "fallback"
+        return fallback
 
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
@@ -397,195 +550,141 @@ def generate_advice(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
             model=ADVICE_MODEL,
             input=[
                 {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "You are a practical agronomy advisor for farmers in the Western Balkans. "
+                                "Be concise, practical, and uncertainty-aware. "
+                                "If diagnosis is uncertain, say so clearly and avoid strong claims."
+                            ),
+                        }
+                    ],
+                },
+                {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": ADVICE_GENERATOR_PROMPT},
-                        {"type": "input_text", "text": json.dumps(payload, ensure_ascii=False)},
+                        {
+                            "type": "input_text",
+                            "text": "Using the JSON below, generate farmer guidance.\n\n" + json.dumps(payload, ensure_ascii=False, indent=2),
+                        }
                     ],
-                }
+                },
             ],
-            temperature=0.2,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "farmer_advice",
+                    "schema": _json_schema_farmer_advice(),
+                    "strict": True,
+                }
+            },
         )
-        parsed = _safe_json_load(response.output_text, fallback)
-        merged = {**fallback, **parsed}
-        return merged, "openai"
+        return json.loads(response.output_text)
     except Exception:
-        return fallback, "fallback"
+        return fallback
+
+
+def run_full_pipeline(image: Image.Image) -> dict[str, Any]:
+    model_loader_status = get_local_model_status()
+    vision_result, vision_source = run_vision_gatekeeper(image)
+    vision_result = {**vision_result, "source": vision_source}
+
+    if vision_result.get("contains_person", False):
+        decision_result = {
+            "status": "reject",
+            "message": "This image contains a person, not a plant.",
+        }
+        return {
+            "vision_result": vision_result,
+            "model_result": None,
+            "decision_result": decision_result,
+            "advice_result": None,
+            "trace": [
+                _trace_entry("vision_gatekeeper", "completed", vision_result),
+                _trace_entry("input_triage", "stopped", decision_result, vision_result.get("rejection_reason", "")),
+            ],
+            "status": "invalid_input",
+            "message": "Na slici je osoba, ne biljka. Pošalji jasnu fotografiju lista ili stabla.",
+            "vision": vision_result,
+            "meta": {"vision_source": vision_source, "advice_source": "none"},
+        }
+
+    if not vision_result.get("is_plant", False):
+        decision_result = {
+            "status": "reject",
+            "message": "This does not appear to be a plant.",
+        }
+        return {
+            "vision_result": vision_result,
+            "model_result": None,
+            "decision_result": decision_result,
+            "advice_result": None,
+            "trace": [
+                _trace_entry("vision_gatekeeper", "completed", vision_result),
+                _trace_entry("input_triage", "stopped", decision_result, "The image does not look like a plant."),
+            ],
+            "status": "invalid_input",
+            "message": "Ovo ne izgleda kao biljka. Pošalji jasnu fotografiju lista ili stabla.",
+            "vision": vision_result,
+            "meta": {"vision_source": vision_source, "advice_source": "none"},
+        }
+
+    uncertain = vision_result.get("image_quality") != "good" or not vision_result.get("symptoms_visible", False)
+
+    model_result = predict_with_local_model(image, top_k=TOP_K, likely_crop=vision_result.get("likely_crop", "unknown"))
+    decision_result = decision_layer(vision_result, model_result)
+    if uncertain:
+        decision_result = {
+            **decision_result,
+            "status": "uncertain_diagnosis",
+            "message": "The image is usable, but confidence is limited because image quality or symptom visibility is poor.",
+            "uncertain": True,
+        }
+    advice_result = generate_farmer_advice(vision_result, model_result, decision_result)
+
+    trace = [
+        _trace_entry("vision_gatekeeper", "completed", vision_result),
+        _trace_entry(
+            "input_triage",
+            "completed" if not uncertain else "completed_uncertain",
+            {
+                "status": decision_result["status"],
+                "message": decision_result["message"],
+                "uncertain": uncertain,
+            },
+            "Image quality or symptom visibility is insufficient." if uncertain else "Image is usable for diagnosis.",
+        ),
+        _trace_entry("local_model_loader", "completed", model_loader_status),
+        _trace_entry("local_h5_model", "completed" if model_result["model_source"] == "local_h5" else "completed_with_fallback", model_result),
+        _trace_entry("decision_layer", "completed", decision_result),
+        _trace_entry("advice_generator", "completed", {"summary": advice_result.get("summary", ""), "source": "openai" if OPENAI_API_KEY and OpenAI is not None else "fallback"}),
+    ]
+
+    return {
+        "vision_result": vision_result,
+        "model_result": model_result,
+        "decision_result": decision_result,
+        "advice_result": advice_result,
+        "trace": trace,
+        "status": decision_result["status"],
+        "message": decision_result.get("message", ""),
+        "crop": vision_result.get("likely_crop", "unknown"),
+        "diagnosis": model_result.get("predicted_class", ""),
+        "confidence": round(float(model_result.get("confidence", 0.0)), 4),
+        "prediction_margin": round(float(model_result.get("margin", 0.0)), 4),
+        "top_k": [
+            {"label": item["class_name"], "probability": round(float(item["confidence"]), 4)}
+            for item in model_result.get("top_predictions", [])
+        ],
+        "symptoms": vision_result.get("symptom_description", ""),
+        "trust_checks": decision_result.get("reasons", {}),
+        "vision": vision_result,
+        "model_loader_status": model_loader_status,
+        "meta": {"vision_source": vision_source, "advice_source": "openai" if OPENAI_API_KEY and OpenAI is not None else "fallback"},
+    }
 
 
 def run_pipeline(image: Image.Image) -> dict[str, Any]:
-    trace: list[dict[str, Any]] = []
-
-    trace.append(_trace_entry("pipeline_start", "completed", {"message": "Pipeline started"}))
-
-    vision, vision_source = analyze_with_vision(image)
-    trace.append(
-        _trace_entry(
-            "vision_gatekeeper",
-            "completed",
-            {
-                "source": vision_source,
-                "is_plant": vision.get("is_plant", False),
-                "contains_person": vision.get("contains_person", False),
-                "primary_subject": vision.get("primary_subject", "unknown"),
-                "image_quality": vision.get("image_quality", "unknown"),
-                "likely_crop": vision.get("likely_crop", "unknown"),
-                "symptoms_visible": vision.get("symptoms_visible", False),
-                "diagnosis_support": vision.get("diagnosis_support", "uncertain"),
-                "rejection_reason": vision.get("rejection_reason", ""),
-            },
-        )
-    )
-
-    if vision.get("contains_person", False):
-        trace.append(
-            _trace_entry(
-                "input_triage",
-                "stopped",
-                {"status": "invalid_input"},
-                vision.get("rejection_reason", "A person was detected in the image."),
-            )
-        )
-        return {
-            "status": "invalid_input",
-            "message": "Na slici je osoba, ne biljka. Pošalji jasnu fotografiju lista ili stabla.",
-            "vision": vision,
-            "trace": trace,
-            "meta": {"vision_source": vision_source, "advice_source": "none"},
-        }
-
-    if not vision.get("is_plant", False):
-        trace.append(
-            _trace_entry(
-                "input_triage",
-                "stopped",
-                {"status": "invalid_input"},
-                "The image does not look like a plant, so disease prediction was not run.",
-            )
-        )
-        return {
-            "status": "invalid_input",
-            "message": "Ovo ne izgleda kao biljka. Pošalji jasnu fotografiju lista ili stabla.",
-            "vision": vision,
-            "trace": trace,
-            "meta": {"vision_source": vision_source, "advice_source": "none"},
-        }
-
-    if vision.get("image_quality") == "poor":
-        trace.append(
-            _trace_entry(
-                "input_triage",
-                "stopped",
-                {"status": "retake_required"},
-                "Image quality is too poor for a reliable model run.",
-            )
-        )
-        return {
-            "status": "retake_required",
-            "message": "Slika je nejasna za pouzdanu dijagnostiku. Približi list, fokusiraj i slikaj po dnevnom svetlu.",
-            "vision": vision,
-            "trace": trace,
-            "meta": {"vision_source": vision_source, "advice_source": "none"},
-        }
-
-    if not vision.get("symptoms_visible", False):
-        trace.append(
-            _trace_entry(
-                "input_triage",
-                "stopped",
-                {"status": "insufficient_evidence"},
-                "No visible symptoms were detected, so the local model was not executed.",
-            )
-        )
-        return {
-            "status": "insufficient_evidence",
-            "message": "Nema dovoljno vidljivih simptoma. Pošalji fotografiju problematičnog dela biljke iz bližeg kadra.",
-            "vision": vision,
-            "trace": trace,
-            "meta": {"vision_source": vision_source, "advice_source": "none"},
-        }
-
-    prediction, prediction_debug = _predict_with_local_h5(image)
-    if prediction is None:
-        prediction = _fallback_stub_prediction(image, vision.get("likely_crop", "unknown"))
-        prediction_debug = {
-            **prediction_debug,
-            "source": "fallback_stub",
-            "available": False,
-            "label": prediction.label,
-            "confidence": round(prediction.confidence, 4),
-            "margin": round(prediction.margin, 4),
-            "top_k": prediction.top_k,
-        }
-        trace.append(
-            _trace_entry(
-                "local_h5_model",
-                "completed_with_fallback",
-                prediction_debug,
-                "The local .h5 model did not return a usable prediction, so the deterministic stub was used.",
-            )
-        )
-    else:
-        trace.append(
-            _trace_entry(
-                "local_h5_model",
-                "completed",
-                prediction_debug,
-                "The local .h5 model returned a valid prediction.",
-            )
-        )
-
-    trust = _diagnostic_trust(
-        likely_crop=vision.get("likely_crop", "unknown"),
-        label=prediction.label,
-        confidence=prediction.confidence,
-        margin=prediction.margin,
-        diagnosis_support=vision.get("diagnosis_support", "uncertain"),
-    )
-    trace.append(
-        _trace_entry(
-            "trust_policy",
-            "completed",
-            trust,
-            "The trust policy decided whether the diagnosis is accepted or uncertain.",
-        )
-    )
-
-    advice_payload = {
-        "status": trust["status"],
-        "crop": vision.get("likely_crop", "unknown"),
-        "diagnosis": prediction.label,
-        "confidence": round(prediction.confidence, 4),
-        "visible_symptoms": vision.get("symptom_description", ""),
-        "region": "Western Balkans",
-        "prediction_margin": round(prediction.margin, 4),
-    }
-
-    advice, advice_source = generate_advice(advice_payload)
-    trace.append(
-        _trace_entry(
-            "advice_generator",
-            "completed",
-            {
-                "source": advice_source,
-                "summary": advice.get("summary", ""),
-            },
-            "Advice generation finished and returned farmer guidance.",
-        )
-    )
-
-    return {
-        "status": trust["status"],
-        "crop": vision.get("likely_crop", "unknown"),
-        "diagnosis": prediction.label,
-        "confidence": round(prediction.confidence, 4),
-        "prediction_margin": round(prediction.margin, 4),
-        "top_k": prediction.top_k,
-        "symptoms": vision.get("symptom_description", ""),
-        "trust_checks": trust["reasons"],
-        "prediction_debug": prediction_debug,
-        "trace": trace,
-        "advice": advice,
-        "vision": vision,
-        "meta": {"vision_source": vision_source, "advice_source": advice_source},
-    }
+    return run_full_pipeline(image)
