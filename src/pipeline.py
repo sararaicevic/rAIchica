@@ -464,29 +464,29 @@ def _diagnostic_trust(
 def _fallback_advice(payload: dict[str, Any]) -> dict[str, Any]:
     uncertain = payload.get("status") != "accepted_diagnosis"
     summary = (
-        "Procena je nesigurna. Potrebna je jasnija fotografija i lokalna potvrda agronoma."
+        "The assessment is uncertain. A clearer photo and local agronomist confirmation are needed."
         if uncertain
-        else f"Detektovana je verovatna bolest: {payload.get('diagnosis', 'nepoznato')}."
+        else f"A likely disease was detected: {payload.get('diagnosis', 'unknown')}."
     )
 
     return {
         "summary": summary,
         "chemical_treatment": [
-            "Koristiti registrovani fungicid prema etiketi (aktivna materija prema lokalnoj regulativi)."
+            "Use a registered fungicide according to the label and local regulations."
         ],
         "organic_alternatives": [
-            "Ukloniti jako zaražene listove i poboljšati provetravanje useva.",
-            "Primena preparata na bazi bakra ili sumpora u dozvoljenim okvirima.",
+            "Remove heavily infected leaves and improve crop airflow.",
+            "Apply copper- or sulfur-based products only where permitted.",
         ],
         "prevention_steps": [
-            "Zalivanje usmeriti na zonu korena, izbegavati kvašenje listova.",
-            "Rotacija useva i dezinfekcija alata.",
+            "Water at the root zone and avoid wetting the leaves.",
+            "Rotate crops and disinfect tools.",
         ],
         "neighboring_plant_protection": [
-            "Pregledati susedne biljke i preventivno ukloniti sumnjive delove.",
-            "Pojačati razmak između biljaka radi cirkulacije vazduha.",
+            "Inspect neighboring plants and remove suspicious parts early.",
+            "Increase spacing between plants to improve air circulation.",
         ],
-        "eco_impact_note": "Minimizovati broj tretmana i poštovati karencu; prioritet je ciljana i odgovorna primena.",
+        "eco_impact_note": "Minimize treatments and respect pre-harvest intervals; prioritize targeted, responsible application.",
     }
 
 
@@ -606,7 +606,7 @@ def run_full_pipeline(image: Image.Image) -> dict[str, Any]:
                 _trace_entry("input_triage", "stopped", decision_result, vision_result.get("rejection_reason", "")),
             ],
             "status": "invalid_input",
-            "message": "Na slici je osoba, ne biljka. Pošalji jasnu fotografiju lista ili stabla.",
+            "message": "This image contains a person, not a plant. Please upload a clear photo of a leaf or plant.",
             "vision": vision_result,
             "meta": {"vision_source": vision_source, "advice_source": "none"},
         }
@@ -626,7 +626,7 @@ def run_full_pipeline(image: Image.Image) -> dict[str, Any]:
                 _trace_entry("input_triage", "stopped", decision_result, "The image does not look like a plant."),
             ],
             "status": "invalid_input",
-            "message": "Ovo ne izgleda kao biljka. Pošalji jasnu fotografiju lista ili stabla.",
+            "message": "This does not appear to be a plant. Please upload a clear photo of a leaf or plant.",
             "vision": vision_result,
             "meta": {"vision_source": vision_source, "advice_source": "none"},
         }
