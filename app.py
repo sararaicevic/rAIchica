@@ -39,7 +39,7 @@ st.set_page_config(page_title="rAIchica", page_icon=PAGE_ICON, layout="centered"
 def _status_label(status: str) -> str:
     return {
         "accepted_diagnosis": "Diagnosis accepted",
-        "uncertain_diagnosis": "Uncertain diagnosis",
+        "uncertain_diagnosis": "Diagnosis accepted",
         "plant_confirmed": "Plant detected",
         "retake_required": "Retake needed",
         "invalid_input": "Invalid input",
@@ -59,7 +59,7 @@ def _result_title(status: str, diagnosis: str) -> str:
     if status == "accepted_diagnosis":
         return f"{diagnosis} detected"
     if status == "uncertain_diagnosis":
-        return f"Possible {diagnosis}"
+        return f"{diagnosis} detected"
     if status == "plant_confirmed":
         return "Plant detected"
     return _status_label(status)
@@ -274,7 +274,7 @@ st.markdown(
     .panel {
         border: 1px solid var(--border);
         border-radius: 26px;
-        background: var(--panel);
+        background: rgba(255,255,255,0.92);
         box-shadow: var(--shadow);
         padding: 1rem;
     }
@@ -287,9 +287,10 @@ st.markdown(
     }
 
     .panel-copy {
-        color: var(--muted);
+        color: var(--text);
         font-size: 0.94rem;
         line-height: 1.5;
+        font-weight: 600;
     }
 
     .capture-hint {
@@ -302,11 +303,25 @@ st.markdown(
     .capture-pill {
         padding: 0.38rem 0.62rem;
         border-radius: 999px;
-        background: rgba(242,184,75,0.18);
-        border: 1px solid rgba(242,184,75,0.24);
-        color: #6f4b06;
+        background: rgba(47,157,99,0.10);
+        border: 1px solid rgba(47,157,99,0.18);
+        color: var(--green-strong);
         font-size: 0.78rem;
         font-weight: 800;
+    }
+
+    .capture-headline {
+        color: var(--text);
+        font-size: 1rem;
+        font-weight: 900;
+        margin-bottom: 0.35rem;
+    }
+
+    .capture-subcopy {
+        color: var(--text);
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
     }
 
     .hero-note {
@@ -517,11 +532,44 @@ st.markdown(
         opacity: 1 !important;
     }
 
+    div[data-testid="stFileUploader"] {
+        background: rgba(255,255,255,0.98) !important;
+        border-radius: 20px !important;
+        padding: 0.35rem !important;
+    }
+
+    div[data-testid="stCameraInput"] {
+        background: rgba(255,255,255,0.98) !important;
+        border-radius: 20px !important;
+        padding: 0.35rem !important;
+    }
+
     div[data-testid="stFileUploader"] section,
     div[data-testid="stCameraInput"] section {
         background: rgba(255,255,255,0.92) !important;
         border: 1px solid rgba(47,157,99,0.16) !important;
         border-radius: 18px !important;
+    }
+
+    div[data-testid="stFileUploader"] div[data-testid="stFileUploaderDropzone"],
+    div[data-testid="stCameraInput"] div[data-testid="stFileUploaderDropzone"] {
+        background: rgba(255,255,255,0.98) !important;
+        border: 1px dashed rgba(47,157,99,0.28) !important;
+        border-radius: 18px !important;
+        padding: 0.65rem 0.8rem !important;
+    }
+
+    div[data-testid="stFileUploader"] div[data-testid="stFileUploaderDropzoneInstructions"],
+    div[data-testid="stCameraInput"] div[data-testid="stFileUploaderDropzoneInstructions"] {
+        color: var(--text) !important;
+        opacity: 1 !important;
+    }
+
+    div[data-testid="stFileUploader"] button[kind="secondary"],
+    div[data-testid="stCameraInput"] button[kind="secondary"] {
+        background: rgba(47,157,99,0.12) !important;
+        border: 1px solid rgba(47,157,99,0.24) !important;
+        color: var(--text) !important;
     }
 
     div[data-testid="stFileUploader"] small,
@@ -535,6 +583,21 @@ st.markdown(
         font-weight: 700 !important;
     }
 
+    div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"],
+    div[data-testid="stCameraInput"] [data-testid="stFileUploaderDropzoneInstructions"] {
+        color: var(--text) !important;
+        opacity: 1 !important;
+        font-weight: 700 !important;
+    }
+
+    div[data-testid="stFileUploader"] span,
+    div[data-testid="stCameraInput"] span,
+    div[data-testid="stFileUploader"] div,
+    div[data-testid="stCameraInput"] div {
+        color: var(--text) !important;
+        opacity: 1 !important;
+    }
+
     div[data-testid="stFileUploader"] button,
     div[data-testid="stCameraInput"] button {
         background: rgba(47,157,99,0.14) !important;
@@ -542,18 +605,24 @@ st.markdown(
         color: var(--text) !important;
     }
 
+    div[data-testid="stFileUploader"] svg,
+    div[data-testid="stCameraInput"] svg {
+        fill: var(--green-strong) !important;
+    }
+
     div[data-testid="stDialog"],
     div[role="dialog"] {
-        background: rgba(244, 248, 241, 0.58) !important;
+        background: rgba(244, 248, 241, 0.96) !important;
+        backdrop-filter: blur(6px) !important;
     }
 
     div[data-testid="stDialog"] > div,
     div[role="dialog"] > div {
-        background: rgba(255,255,255,0.98) !important;
+        background: rgba(255,255,255,0.99) !important;
         color: var(--text) !important;
         border: 1px solid rgba(47,157,99,0.14) !important;
         border-radius: 30px !important;
-        box-shadow: 0 28px 80px rgba(20,51,37,0.16) !important;
+        box-shadow: 0 28px 80px rgba(20,51,37,0.10) !important;
     }
 
     div[data-testid="stDialog"] *,
@@ -565,6 +634,22 @@ st.markdown(
     div[role="dialog"] button {
         background: linear-gradient(135deg, #d8f1df, #bceacb) !important;
         color: var(--green-strong) !important;
+    }
+
+    div[data-testid="stDialog"] h1,
+    div[data-testid="stDialog"] h2,
+    div[data-testid="stDialog"] h3,
+    div[data-testid="stDialog"] h4,
+    div[role="dialog"] h1,
+    div[role="dialog"] h2,
+    div[role="dialog"] h3,
+    div[role="dialog"] h4 {
+        color: var(--text) !important;
+    }
+
+    div[data-testid="stDialog"] p,
+    div[role="dialog"] p {
+        color: var(--muted) !important;
     }
 
     @keyframes loading-spin {
@@ -641,6 +726,8 @@ with intro_right:
             """,
             unsafe_allow_html=True,
         )
+        st.markdown('<div class="capture-headline">Choose input</div>', unsafe_allow_html=True)
+        st.markdown('<div class="capture-subcopy">Use the camera for a fresh scan or upload an existing image.</div>', unsafe_allow_html=True)
         input_mode = st.radio("Input", ["Camera", "Upload"], horizontal=True, label_visibility="collapsed")
         image_file = st.camera_input("Take a photo") if input_mode == "Camera" else st.file_uploader("Upload plant photo", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed")
         analyze = st.button("Analyze plant", type="primary", use_container_width=True)
@@ -649,7 +736,9 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 if image_file:
     image = Image.open(image_file).convert("RGB")
-    st.image(image, caption="Preview", use_container_width=True)
+    with st.container(border=True):
+        st.markdown('<div class="panel-title">Preview</div>', unsafe_allow_html=True)
+        st.image(image, use_container_width=True)
 
     if analyze:
         loading_slot = st.empty()

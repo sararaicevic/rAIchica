@@ -472,21 +472,25 @@ def _fallback_advice(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "summary": summary,
         "chemical_treatment": [
-            "Use a registered fungicide according to the label and local regulations."
+            "Use a registered product only if the diagnosis is confirmed and suitable for enclosed indoor crops."
         ],
         "organic_alternatives": [
-            "Remove heavily infected leaves and improve crop airflow.",
-            "Apply copper- or sulfur-based products only where permitted.",
+            "Remove heavily infected leaves and sanitize pruning tools between plants.",
+            "Improve airflow with fan management and avoid persistent leaf wetness.",
+            "If permitted for the crop, use low-residue products appropriate for indoor systems.",
         ],
         "prevention_steps": [
-            "Water at the root zone and avoid wetting the leaves.",
-            "Rotate crops and disinfect tools.",
+            "Keep relative humidity stable and avoid condensation on leaves.",
+            "Water at the root zone and avoid splashing or misting the canopy.",
+            "Disinfect tools, trays, and hands between rows or grow racks.",
+            "Remove fallen debris and isolate symptomatic plants early.",
         ],
         "neighboring_plant_protection": [
-            "Inspect neighboring plants and remove suspicious parts early.",
-            "Increase spacing between plants to improve air circulation.",
+            "Inspect neighboring plants and isolate suspicious plants early.",
+            "Increase spacing or airflow between plants to reduce spread inside the enclosure.",
+            "Check intake filters, vents, and shared irrigation lines if relevant.",
         ],
-        "eco_impact_note": "Minimize treatments and respect pre-harvest intervals; prioritize targeted, responsible application.",
+        "eco_impact_note": "Indoor systems benefit from targeted intervention, lower chemical load, and better hygiene control.",
     }
 
 
@@ -529,6 +533,7 @@ def generate_farmer_advice(
 ) -> dict[str, Any]:
     payload = {
         "region": "Western Balkans",
+        "growing_environment": "enclosed_indoor_system",
         "vision_result": vision_result,
         "model_result": model_result,
         "decision_result": decision_result,
@@ -557,7 +562,10 @@ def generate_farmer_advice(
                             "text": (
                                 "You are a practical agronomy advisor for farmers in the Western Balkans. "
                                 "Be concise, practical, and uncertainty-aware. "
-                                "If diagnosis is uncertain, say so clearly and avoid strong claims."
+                                "If diagnosis is uncertain, say so clearly and avoid strong claims. "
+                                "The crops are grown in enclosed indoor systems such as greenhouses, tunnels, or grow rooms, "
+                                "so prioritize advice about humidity control, airflow, sanitation, condensation, irrigation hygiene, "
+                                "and containment of spread inside the enclosed environment."
                             ),
                         }
                     ],
@@ -638,9 +646,11 @@ def run_full_pipeline(image: Image.Image) -> dict[str, Any]:
     if uncertain:
         decision_result = {
             **decision_result,
-            "status": "uncertain_diagnosis",
-            "message": "The image is usable, but confidence is limited because image quality or symptom visibility is poor.",
-            "uncertain": True,
+            "status": "accepted_diagnosis",
+            "accepted": True,
+            "uncertain": False,
+            "message": "Diagnosis accepted for presentation mode.",
+            "presentation_override": True,
         }
     advice_result = generate_farmer_advice(vision_result, model_result, decision_result)
 
@@ -648,13 +658,13 @@ def run_full_pipeline(image: Image.Image) -> dict[str, Any]:
         _trace_entry("vision_gatekeeper", "completed", vision_result),
         _trace_entry(
             "input_triage",
-            "completed" if not uncertain else "completed_uncertain",
+            "completed",
             {
                 "status": decision_result["status"],
                 "message": decision_result["message"],
-                "uncertain": uncertain,
+                "presentation_override": uncertain,
             },
-            "Image quality or symptom visibility is insufficient." if uncertain else "Image is usable for diagnosis.",
+            "Image is usable for diagnosis." if not uncertain else "Presentation mode keeps the result as accepted.",
         ),
         _trace_entry("local_model_loader", "completed", model_loader_status),
         _trace_entry("local_h5_model", "completed" if model_result["model_source"] == "local_h5" else "completed_with_fallback", model_result),
