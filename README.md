@@ -82,6 +82,7 @@ If model loading fails, it automatically falls back to demo deterministic predic
 5. Deploy.
 
 Note: `requirements.txt` excludes TensorFlow for cloud compatibility on newer Python runtimes.
+For Streamlit Cloud production, set Python to a TensorFlow-supported version such as 3.13 and keep `tensorflow` in `requirements.txt`.
 If TensorFlow is unavailable, app still works using fallback classifier logic.
 
 ## Notes
