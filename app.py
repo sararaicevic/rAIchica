@@ -100,5 +100,28 @@ if uploaded:
         with st.expander("Debug: full pipeline JSON", expanded=False):
             st.code(json.dumps(result, indent=2, ensure_ascii=False), language="json")
 
+        prediction_debug = result.get("prediction_debug")
+        if prediction_debug:
+            with st.expander("Debug: local model output", expanded=False):
+                st.write("This shows the raw `.h5` output and how it was converted into the final decision.")
+                st.code(json.dumps(prediction_debug, indent=2, ensure_ascii=False), language="json")
+
+        trace = result.get("trace")
+        if trace:
+            with st.expander("Debug: pipeline trace", expanded=True):
+                st.write("Step-by-step execution trace in English.")
+                for index, entry in enumerate(trace, start=1):
+                    step = entry.get("step", "unknown_step")
+                    status = entry.get("status", "unknown")
+                    returned = entry.get("returned")
+                    note = entry.get("note")
+
+                    st.markdown(f"**{index}. {step}**")
+                    st.write(f"Status: `{status}`")
+                    if note:
+                        st.write(f"Note: {note}")
+                    if returned is not None:
+                        st.code(json.dumps(returned, indent=2, ensure_ascii=False), language="json")
+
 else:
     st.caption("Upload a plant image to start.")

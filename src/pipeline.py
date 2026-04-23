@@ -6,6 +6,7 @@ import base64
 import hashlib
 import io
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from dataclasses import dataclass
@@ -39,6 +40,8 @@ try:
     from tensorflow.keras.models import load_model
 except Exception:  # pragma: no cover - import safety for environments without package
     load_model = None
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -88,22 +91,26 @@ def _load_class_names() -> list[str]:
 @lru_cache(maxsize=1)
 def _load_local_model():
     if load_model is None:
+        logger.info("Local Keras loader is unavailable; falling back to stub predictions.")
         return None
 
     path = Path(MODEL_PATH)
     if not path.exists():
+        logger.warning("Local model file does not exist: %s", path)
         return None
 
     try:
+        logger.info("Loading local .h5 model from %s", path)
         return load_model(path, compile=False)
     except Exception:
+        logger.exception("Failed to load local .h5 model from %s", path)
         return None
 
 
-def _predict_with_local_h5(image: Image.Image) -> LocalPrediction | None:
+def _predict_with_local_h5(image: Image.Image) -> tuple[LocalPrediction | None, dict[str, Any]]:
     model = _load_local_model()
     if model is None:
-        return None
+        return None, {"source": "local_h5", "available": False}
 
     class_names = _load_class_names()
     resized = image.copy().convert("RGB").resize((MODEL_INPUT_SIZE, MODEL_INPUT_SIZE))
@@ -113,18 +120,35 @@ def _predict_with_local_h5(image: Image.Image) -> LocalPrediction | None:
     try:
         preds = model.predict(arr, verbose=0)
     except Exception:
-        return None
+        logger.exception("Local model prediction failed")
+        return None, {"source": "local_h5", "available": True, "error": "prediction_failed"}
 
     if preds is None or len(preds) == 0:
-        return None
+        logger.warning("Local model returned an empty prediction payload")
+        return None, {"source": "local_h5", "available": True, "error": "empty_prediction"}
 
-    probs = np.array(preds[0], dtype=np.float32)
+    raw_output = np.array(preds[0], dtype=np.float32)
+    logger.info("Local model raw output: %s", raw_output.tolist())
+
+    probs = np.array(raw_output, dtype=np.float32)
     if probs.ndim != 1 or probs.size == 0:
-        return None
+        logger.warning("Local model output has unexpected shape: %s", probs.shape)
+        return None, {
+            "source": "local_h5",
+            "available": True,
+            "error": "invalid_shape",
+            "raw_output": raw_output.tolist(),
+        }
 
     probs = np.maximum(probs, 0)
     if probs.sum() <= 0:
-        return None
+        logger.warning("Local model output sums to zero after sanitization")
+        return None, {
+            "source": "local_h5",
+            "available": True,
+            "error": "non_positive_output",
+            "raw_output": raw_output.tolist(),
+        }
     probs = probs / probs.sum()
 
     if len(class_names) != len(probs):
@@ -139,12 +163,32 @@ def _predict_with_local_h5(image: Image.Image) -> LocalPrediction | None:
         for i in sorted_idx[: min(TOP_K, len(sorted_idx))]
     ]
 
-    return LocalPrediction(
+    prediction = LocalPrediction(
         label=class_names[top_idx],
         confidence=float(probs[top_idx]),
         top_k=top_k,
         margin=float(probs[top_idx] - probs[second_idx]),
     )
+    debug = {
+        "source": "local_h5",
+        "available": True,
+        "model_path": str(Path(MODEL_PATH)),
+        "input_size": MODEL_INPUT_SIZE,
+        "class_names": class_names,
+        "raw_output": raw_output.tolist(),
+        "normalized_probs": probs.tolist(),
+        "predicted_label": prediction.label,
+        "confidence": round(prediction.confidence, 4),
+        "margin": round(prediction.margin, 4),
+        "top_k": top_k,
+    }
+    logger.info(
+        "Local model prediction: label=%s confidence=%.4f margin=%.4f",
+        prediction.label,
+        prediction.confidence,
+        prediction.margin,
+    )
+    return prediction, debug
 
 
 def _fallback_vision_analysis(image: Image.Image) -> dict[str, Any]:
@@ -154,20 +198,33 @@ def _fallback_vision_analysis(image: Image.Image) -> dict[str, Any]:
     brightness = float(arr.mean())
     sharpness = float(np.var(np.diff(arr, axis=0))) if arr.shape[0] > 1 else 0.0
     green_ratio = float((arr[:, :, 1] > arr[:, :, 0]).mean())
+    skin_like = (
+        (arr[:, :, 0] > 95)
+        & (arr[:, :, 1] > 40)
+        & (arr[:, :, 2] > 20)
+        & (arr[:, :, 0] > arr[:, :, 1])
+        & (arr[:, :, 1] > arr[:, :, 2])
+    )
+    skin_ratio = float(skin_like.mean())
 
-    is_plant = green_ratio > 0.30
+    contains_person = skin_ratio > 0.12
+    is_plant = green_ratio > 0.30 and not contains_person
     quality = "good" if brightness > 45 and sharpness > 30 else "poor"
     symptoms_visible = bool(((arr[:, :, 0] > 150) & (arr[:, :, 1] < 120)).mean() > 0.05)
 
     likely_crop = "tomato" if is_plant else "unknown"
+    primary_subject = "plant" if is_plant else ("human" if contains_person else "other")
     return {
         "is_plant": is_plant,
+        "contains_person": contains_person,
+        "primary_subject": primary_subject,
         "image_quality": quality,
         "likely_crop": likely_crop,
         "symptoms_visible": symptoms_visible,
         "symptom_description": (
             "Possible leaf discoloration visible." if symptoms_visible else "No clear disease symptoms visible."
         ),
+        "rejection_reason": "Human-like skin tones dominate the image." if contains_person else "",
         "diagnosis_support": "supported" if likely_crop in SUPPORTED_CROPS else "uncertain",
     }
 
@@ -212,11 +269,7 @@ def _crop_disease_space(crop: str) -> list[str]:
     return spaces.get(crop, ["Unknown Leaf Disease", "Healthy Plant", "Nutrient Stress"])
 
 
-def predict_disease(image: Image.Image, likely_crop: str) -> LocalPrediction:
-    local_prediction = _predict_with_local_h5(image)
-    if local_prediction is not None:
-        return local_prediction
-
+def _fallback_stub_prediction(image: Image.Image, likely_crop: str) -> LocalPrediction:
     resized = image.copy().convert("RGB")
     resized.thumbnail((224, 224))
 
@@ -248,6 +301,14 @@ def predict_disease(image: Image.Image, likely_crop: str) -> LocalPrediction:
         top_k=top_k,
         margin=margin,
     )
+
+
+def predict_disease(image: Image.Image, likely_crop: str) -> LocalPrediction:
+    local_prediction, _ = _predict_with_local_h5(image)
+    if local_prediction is not None:
+        return local_prediction
+
+    return _fallback_stub_prediction(image, likely_crop)
 
 
 def _diagnostic_trust(
@@ -315,6 +376,15 @@ def _fallback_advice(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _trace_entry(step: str, status: str, returned: dict[str, Any] | None = None, note: str | None = None) -> dict[str, Any]:
+    entry: dict[str, Any] = {"step": step, "status": status}
+    if returned is not None:
+        entry["returned"] = returned
+    if note is not None:
+        entry["note"] = note
+    return entry
+
+
 def generate_advice(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
     fallback = _fallback_advice(payload)
 
@@ -344,33 +414,126 @@ def generate_advice(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
 
 def run_pipeline(image: Image.Image) -> dict[str, Any]:
+    trace: list[dict[str, Any]] = []
+
+    trace.append(_trace_entry("pipeline_start", "completed", {"message": "Pipeline started"}))
+
     vision, vision_source = analyze_with_vision(image)
+    trace.append(
+        _trace_entry(
+            "vision_gatekeeper",
+            "completed",
+            {
+                "source": vision_source,
+                "is_plant": vision.get("is_plant", False),
+                "contains_person": vision.get("contains_person", False),
+                "primary_subject": vision.get("primary_subject", "unknown"),
+                "image_quality": vision.get("image_quality", "unknown"),
+                "likely_crop": vision.get("likely_crop", "unknown"),
+                "symptoms_visible": vision.get("symptoms_visible", False),
+                "diagnosis_support": vision.get("diagnosis_support", "uncertain"),
+                "rejection_reason": vision.get("rejection_reason", ""),
+            },
+        )
+    )
+
+    if vision.get("contains_person", False):
+        trace.append(
+            _trace_entry(
+                "input_triage",
+                "stopped",
+                {"status": "invalid_input"},
+                vision.get("rejection_reason", "A person was detected in the image."),
+            )
+        )
+        return {
+            "status": "invalid_input",
+            "message": "Na slici je osoba, ne biljka. Pošalji jasnu fotografiju lista ili stabla.",
+            "vision": vision,
+            "trace": trace,
+            "meta": {"vision_source": vision_source, "advice_source": "none"},
+        }
 
     if not vision.get("is_plant", False):
+        trace.append(
+            _trace_entry(
+                "input_triage",
+                "stopped",
+                {"status": "invalid_input"},
+                "The image does not look like a plant, so disease prediction was not run.",
+            )
+        )
         return {
             "status": "invalid_input",
             "message": "Ovo ne izgleda kao biljka. Pošalji jasnu fotografiju lista ili stabla.",
             "vision": vision,
+            "trace": trace,
             "meta": {"vision_source": vision_source, "advice_source": "none"},
         }
 
     if vision.get("image_quality") == "poor":
+        trace.append(
+            _trace_entry(
+                "input_triage",
+                "stopped",
+                {"status": "retake_required"},
+                "Image quality is too poor for a reliable model run.",
+            )
+        )
         return {
             "status": "retake_required",
             "message": "Slika je nejasna za pouzdanu dijagnostiku. Približi list, fokusiraj i slikaj po dnevnom svetlu.",
             "vision": vision,
+            "trace": trace,
             "meta": {"vision_source": vision_source, "advice_source": "none"},
         }
 
     if not vision.get("symptoms_visible", False):
+        trace.append(
+            _trace_entry(
+                "input_triage",
+                "stopped",
+                {"status": "insufficient_evidence"},
+                "No visible symptoms were detected, so the local model was not executed.",
+            )
+        )
         return {
             "status": "insufficient_evidence",
             "message": "Nema dovoljno vidljivih simptoma. Pošalji fotografiju problematičnog dela biljke iz bližeg kadra.",
             "vision": vision,
+            "trace": trace,
             "meta": {"vision_source": vision_source, "advice_source": "none"},
         }
 
-    prediction = predict_disease(image, vision.get("likely_crop", "unknown"))
+    prediction, prediction_debug = _predict_with_local_h5(image)
+    if prediction is None:
+        prediction = _fallback_stub_prediction(image, vision.get("likely_crop", "unknown"))
+        prediction_debug = {
+            **prediction_debug,
+            "source": "fallback_stub",
+            "available": False,
+            "label": prediction.label,
+            "confidence": round(prediction.confidence, 4),
+            "margin": round(prediction.margin, 4),
+            "top_k": prediction.top_k,
+        }
+        trace.append(
+            _trace_entry(
+                "local_h5_model",
+                "completed_with_fallback",
+                prediction_debug,
+                "The local .h5 model did not return a usable prediction, so the deterministic stub was used.",
+            )
+        )
+    else:
+        trace.append(
+            _trace_entry(
+                "local_h5_model",
+                "completed",
+                prediction_debug,
+                "The local .h5 model returned a valid prediction.",
+            )
+        )
 
     trust = _diagnostic_trust(
         likely_crop=vision.get("likely_crop", "unknown"),
@@ -378,6 +541,14 @@ def run_pipeline(image: Image.Image) -> dict[str, Any]:
         confidence=prediction.confidence,
         margin=prediction.margin,
         diagnosis_support=vision.get("diagnosis_support", "uncertain"),
+    )
+    trace.append(
+        _trace_entry(
+            "trust_policy",
+            "completed",
+            trust,
+            "The trust policy decided whether the diagnosis is accepted or uncertain.",
+        )
     )
 
     advice_payload = {
@@ -391,6 +562,17 @@ def run_pipeline(image: Image.Image) -> dict[str, Any]:
     }
 
     advice, advice_source = generate_advice(advice_payload)
+    trace.append(
+        _trace_entry(
+            "advice_generator",
+            "completed",
+            {
+                "source": advice_source,
+                "summary": advice.get("summary", ""),
+            },
+            "Advice generation finished and returned farmer guidance.",
+        )
+    )
 
     return {
         "status": trust["status"],
@@ -401,6 +583,8 @@ def run_pipeline(image: Image.Image) -> dict[str, Any]:
         "top_k": prediction.top_k,
         "symptoms": vision.get("symptom_description", ""),
         "trust_checks": trust["reasons"],
+        "prediction_debug": prediction_debug,
+        "trace": trace,
         "advice": advice,
         "vision": vision,
         "meta": {"vision_source": vision_source, "advice_source": advice_source},
