@@ -52,6 +52,12 @@ Open `http://localhost:8501`.
 
 ## Local `.h5` model setup
 
+For local `.h5` inference, install local extras:
+
+```bash
+pip install -r requirements-local.txt
+```
+
 1. Create folder `models/`.
 2. Put your model as `models/raichica_v1.h5` (or set `MODEL_PATH`).
 3. Add `models/class_names.txt` with one label per line, in the exact output order of your model.
@@ -74,6 +80,9 @@ If model loading fails, it automatically falls back to demo deterministic predic
 3. Set main file to `app.py`.
 4. Add secret `OPENAI_API_KEY` in app settings.
 5. Deploy.
+
+Note: `requirements.txt` excludes TensorFlow for cloud compatibility on newer Python runtimes.
+If TensorFlow is unavailable, app still works using fallback classifier logic.
 
 ## Notes
 
